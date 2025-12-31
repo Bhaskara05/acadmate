@@ -8,9 +8,16 @@ const admin = require("firebase-admin");
 const multer = require("multer");
 require("dotenv").config();
 
+const authRoutes = require("./routes/authRoutes");
+const profileRoutes = require("./routes/profileRoutes");
+const reminderRoutes = require("./routes/reminderRoutes");
+const attendanceRoutes = require("./routes/attendance");
+const seniorRoutes = require("./routes/seniorRoutes");
+
+const { sendEventReminders } = require("./controllers/reminderController");
+const cookieParser = require("cookie-parser");
 /* ================================
    Firebase Admin Initialization
-================================ */
 const serviceAccount = require("./config/serviceAccountKey.json");
 
 admin.initializeApp({
@@ -20,7 +27,6 @@ admin.initializeApp({
 
 /* ================================
    Express App
-================================ */
 const app = express();
 
 /* ================================
@@ -32,6 +38,8 @@ app.use(
   cors({
     origin: [
       "http://localhost:5173",
+      "http://localhost:3000",
+      "http://localhost:5174",
       "http://localhost:5174",
       "http://localhost:3000",
       process.env.CLIENT_URL,
@@ -41,11 +49,21 @@ app.use(
 );
 
 app.use(express.json({ limit: "10mb" }));
+app.use(express.urlencoded({ extended: true }));
+app.use(cookieParser());
+
+// 🔍 Debug middleware - logs all requests
+app.use((req, res, next) => {
+ 
+  next();
+});
+
+// Register routes
+app.use("/api/auth", authRoutes);
 app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 
 /* ================================
    Rate Limiters
-================================ */
 const apiLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 100,
@@ -62,7 +80,6 @@ app.use("/api", apiLimiter);
 
 /* ================================
    Existing Routes
-================================ */
 const authRoutes = require("./routes/authRoutes");
 const profileRoutes = require("./routes/profileRoutes");
 const reminderRoutes = require("./routes/reminderRoutes");
@@ -72,6 +89,7 @@ app.use("/api/auth", authLimiter, authRoutes);
 app.use("/api/profile", profileRoutes);
 app.use("/api/reminder", reminderRoutes);
 app.use("/api/attendance", attendanceRoutes);
+app.use("/api/seniors", seniorRoutes);
 
 /* ================================
    Discussion System Routes
@@ -95,9 +113,23 @@ app.get("/api/health", (req, res) => {
   });
 });
 
+// ⏰ Daily cron job
+cron.schedule("0 8 * * *", () => {
+  console.log("⏰ Running daily reminder job...");
+  sendEventReminders().catch((err) =>
+    console.error("Error sending reminders:", err)
+  );
+});
+
+// 🛑 Global error handler (MUST be after routes)
+app.use((err, req, res, next) => {
+  console.error('❌ Error:', err.stack);
+  res.status(500).json({
+    success: false,
+    message: "Something went wrong!",
+    error:
 /* ================================
    Cron Job (Daily Reminder)
-================================ */
 const { sendEventReminders } = require("./controllers/reminderController");
 
 cron.schedule("0 8 * * *", async () => {
@@ -111,7 +143,6 @@ cron.schedule("0 8 * * *", async () => {
 
 /* ================================
    Global Error Handler
-================================ */
 app.use((err, req, res, next) => {
   console.error("🔥 Error:", err);
 
@@ -133,9 +164,12 @@ app.use((err, req, res, next) => {
   });
 });
 
+// ❌ 404 handler (MUST be last)
+app.use("*", (req, res) => {
+  console.log(`❌ 404: ${req.method} ${req.originalUrl}`);
+  res.status(404).json({ success: false, message: "Route not found" });
 /* ================================
    404 Handler
-================================ */
 app.use("*", (req, res) => {
   res.status(404).json({
     success: false,
@@ -151,6 +185,8 @@ const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
   console.log(`🌐 Health check: http://localhost:${PORT}/api/health`);
+  
+});
 });
 
 module.exports = app;
